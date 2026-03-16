@@ -19,9 +19,93 @@ import lightkurve as lk
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import pandas as pd
+from urllib.parse import quote
+from astroquery.mast import Catalogs
 
 # Create results folder if it doesn't exist
 os.makedirs("results", exist_ok=True)
+
+def fetch_from_exoplanet_archive(target):
+    """Try NASA Exoplanet Archive first for known planet-host stars."""
+    query = f"""
+    select top 1 hostname, tic_id, st_rad, st_mass, st_teff
+    from pscomppars
+    where hostname = '{target}'
+    """
+
+    url = (
+        "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?"
+        "query=" + quote(query) +
+        "&format=csv"
+    )
+
+    try:
+        df = pd.read_csv(url)
+    except Exception:
+        return None
+
+    if len(df) == 0:
+        return None
+
+    row = df.iloc[0]
+    return {
+        "radius": row["st_rad"] if pd.notna(row["st_rad"]) else None,
+        "mass": row["st_mass"] if pd.notna(row["st_mass"]) else None,
+        "teff": row["st_teff"] if pd.notna(row["st_teff"]) else None,
+        "source": "NASA Exoplanet Archive"
+    }
+
+
+def fetch_from_tic(target):
+    """Fallback to the TESS Input Catalog for general stellar properties."""
+    try:
+        result = Catalogs.query_object(target, catalog="TIC", radius=0.02)
+    except Exception:
+        return None
+
+    if result is None or len(result) == 0:
+        return None
+
+    row = result[0]
+
+    def safe_get(colname):
+        return row[colname] if colname in row.colnames and row[colname] is not None else None
+
+    # TIC columns may vary by environment, so check a few common names
+    radius = safe_get("rad")
+    mass = safe_get("mass")
+    teff = safe_get("Teff")
+
+    return {
+        "radius": float(radius) if radius is not None else None,
+        "mass": float(mass) if mass is not None else None,
+        "teff": float(teff) if teff is not None else None,
+        "source": "TIC"
+    }
+
+
+def get_stellar_params(target):
+    """Use local database first, then archive, then TIC."""
+    if target in STAR_DATABASE:
+        star = STAR_DATABASE[target].copy()
+        star["source"] = "local database"
+        return star
+
+    star = fetch_from_exoplanet_archive(target)
+    if star is not None and any(v is not None for k, v in star.items() if k in ["radius", "mass", "teff"]):
+        return star
+
+    star = fetch_from_tic(target)
+    if star is not None and any(v is not None for k, v in star.items() if k in ["radius", "mass", "teff"]):
+        return star
+
+    return {
+        "radius": None,
+        "mass": None,
+        "teff": None,
+        "source": "not found"
+    }
 
 # -----------------------------------------------------------
 # Built-in stellar parameter database
@@ -78,9 +162,9 @@ def run_pipeline(target,
     elif mission == "TESS":
         search = lk.search_lightcurve(
             target,
-            mission=mission,
+            mission="TESS",
             author="SPOC"
-        )
+    )[:1]
 
     else:
         search = lk.search_lightcurve(
@@ -88,24 +172,50 @@ def run_pipeline(target,
             mission=mission
         )
 
-    print(search)
-    # -------------------------------------------------------
-    # Download the light curve files
-    # -------------------------------------------------------
-    print("Downloading files...")
-    lc_collection = search.download_all()
+    print("Number of search results found:", len(search))
 
-    print("Download complete")
+    if len(search) == 0:
+        print("No light curve files found for this target.")
+        return
 
+# -------------------------------------------------------
+# Download the light curve files
+# -------------------------------------------------------
+# -------------------------------------------------------
+# Download light curve data
+# Kepler: stitch multiple quarters together
+# TESS: use only one sector first for speed
+# -------------------------------------------------------
+# -------------------------------------------------------
+# Download light curve data
+# Kepler: stitch multiple quarters
+# TESS: download only one sector (faster)
+# -------------------------------------------------------
+    if mission == "Kepler":
 
-    # -------------------------------------------------------
-    # Stitch multiple observation segments together
-    # (Kepler data is stored in different time segments)
-    # -------------------------------------------------------
-    print("Stitching files...")
-    lc = lc_collection.stitch()
+        print("Downloading files...")
+        lc_collection = search.download_all()
 
-    print("Stitch complete")
+        print("Download complete")
+
+        print("Stitching files...")
+        lc = lc_collection.stitch()
+
+        print("Stitch complete")
+
+    elif mission == "TESS":
+
+        print("Downloading single TESS sector...")
+        lc = search[0].download()
+
+        print("Download complete")
+
+    else:
+
+        print("Downloading file...")
+        lc = search[0].download()
+
+        print("Download complete")
 
 
     # -------------------------------------------------------
@@ -128,6 +238,8 @@ def run_pipeline(target,
     # This removes long-term stellar brightness variations
     # so that short transit dips are easier to detect
     # -------------------------------------------------------
+    print("Number of data points:", len(lc.time))
+
     print("Flattening...")
     lc_clean = lc.flatten(window_length=flatten_window)
 
@@ -215,12 +327,12 @@ def run_pipeline(target,
     #
     # Convert solar radii → Earth radii
     # -------------------------------------------------------
-    planet_radius_rsun = stellar_radius_rsun * np.sqrt(depth)
-
-    planet_radius_rearth = planet_radius_rsun * 109.1
-
-    print("Estimated planet radius (Earth radii):",
-          planet_radius_rearth)
+    if stellar_radius_rsun is not None:
+        planet_radius_rsun = stellar_radius_rsun * np.sqrt(depth)
+        planet_radius_rearth = planet_radius_rsun * 109.1
+        print("Estimated planet radius (Earth radii):", planet_radius_rearth)
+    else:
+        print("Planet radius cannot be estimated (stellar radius unknown)")
     
     # -------------------------------------------------------
     # Estimate orbital distance using Kepler's Third Law
@@ -444,40 +556,41 @@ mission = input("Enter mission [Kepler]: ").strip()
 if mission == "":
     mission = "Kepler"
 
-# Retrieve stellar parameters from built-in database
-if target not in STAR_DATABASE:
-    print(f"Error: {target} not found in STAR_DATABASE.")
-    print("Add the star parameters to the database to analyze it.")
-else:
-    star = STAR_DATABASE[target]
+star = get_stellar_params(target)
 
-    stellar_radius_rsun = star["radius"]
-    stellar_mass_msun = star["mass"]
-    stellar_teff = star["teff"]
+stellar_radius_rsun = star["radius"]
+stellar_mass_msun = star["mass"]
+stellar_teff = star["teff"]
 
-    settings = choose_search_settings(
-        mission,
-        stellar_radius_rsun,
-        stellar_teff,
-        target
-    )
+print(f"Stellar parameters source: {star['source']}")
+print("radius =", stellar_radius_rsun)
+print("mass =", stellar_mass_msun)
+print("teff =", stellar_teff)
 
-    print("\nUsing automatic search settings:")
-    print("period_range =", settings["period_range"])
-    print("duration_range =", settings["duration_range"])
-    print("flatten_window =", settings["flatten_window"])
-    print("quarter =", settings["quarter"])
+settings = choose_search_settings(
+    mission,
+    stellar_radius_rsun,
+    stellar_teff,
+    target
+)
 
-    run_pipeline(
-        target=target,
-        stellar_radius_rsun=stellar_radius_rsun,
-        stellar_mass_msun=stellar_mass_msun,
-        stellar_teff=stellar_teff,
-        mission=mission,
-        albedo=0.3,
-        period_range=settings["period_range"],
-        duration_range=settings["duration_range"],
-        flatten_window=settings["flatten_window"],
-        quarter=settings["quarter"]
-    )
+print("\nUsing automatic search settings:")
+print("period_range =", settings["period_range"])
+print("duration_range =", settings["duration_range"])
+print("flatten_window =", settings["flatten_window"])
+print("quarter =", settings["quarter"])
+
+run_pipeline(
+    target=target,
+    stellar_radius_rsun=stellar_radius_rsun,
+    stellar_mass_msun=stellar_mass_msun,
+    stellar_teff=stellar_teff,
+    mission=mission,
+    albedo=0.3,
+    period_range=settings["period_range"],
+    duration_range=settings["duration_range"],
+    flatten_window=settings["flatten_window"],
+    quarter=settings["quarter"]
+)
+
 
