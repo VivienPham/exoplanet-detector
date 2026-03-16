@@ -11,8 +11,10 @@ The code is designed to work with photometric light curve data from space missio
 - Transit detection
 - Orbital period estimation
 - Planet radius estimation
-• Orbital distance estimation
-• Planet equilibrium temperature estimation
+- Orbital distance estimation
+- Orbital Velocity estimation
+- Planet equilibrium temperature estimation
+- etc. 
 
 ## Usage
 Run the program with:
@@ -26,6 +28,14 @@ python exoplanet.py
 <p align="center"> <img src="Kepler-10_folded_lightcurve.png" width="600"> </p>
 
 ```
-Detected period: 0.84 days
-Transit depth: 0.00018
+Detected period: 0.8375375375375377 d
+Transit depth: 0.0001794067578906322
+Estimated planet radius (Earth radii): 1.5563015764514885
+Estimated orbital distance (AU): 0.01685086027862866
+Estimated orbital velocity (km/s): 218.88164035175822
+Estimated stellar luminosity (L/Lsun): 1.0244755227171471
+Estimated equilibrium temperature (K): 1973.097816471603
+Estimated equilibrium temperature (C): 1699.947816471603
+Estimated stellar flux relative to Earth: 3607.9244205859054
+
 ```
