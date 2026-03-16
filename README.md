@@ -23,6 +23,8 @@ python exoplanet.py
 
 ### Example Output
 
+<p align="center"> <img src="Kepler-10_folded_lightcurve.png" width="600"> </p>
+
 ```
 Detected period: 0.84 days
 Transit depth: 0.00018
