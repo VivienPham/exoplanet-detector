@@ -338,7 +338,7 @@ def run_pipeline(target,
 
     plt.title(f"BLS Periodogram - {target}")
 
-    plt.savefig(f"{target}_periodogram.png", dpi=300)
+    plt.savefig(f"results/{target}_periodogram.png", dpi=300)
 
     plt.show()
 
@@ -360,7 +360,7 @@ def run_pipeline(target,
     ax.set_xlabel("Phase [days]")
     ax.set_ylabel("Normalized Flux")
 
-    plt.savefig(f"{target}_folded_lightcurve.png", dpi=300)
+    plt.savefig(f"results/{target}_folded_lightcurve.png", dpi=300)
 
     plt.show()
 
