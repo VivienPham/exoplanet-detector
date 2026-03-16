@@ -11,6 +11,8 @@ The code is designed to work with photometric light curve data from space missio
 - Transit detection
 - Orbital period estimation
 - Planet radius estimation
+• Orbital distance estimation
+• Planet equilibrium temperature estimation
 
 ## Usage
 Run the program with:
